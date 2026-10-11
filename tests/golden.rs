@@ -2,7 +2,8 @@
 //! checksums were taken from ScreenForge 0.34.0, where this generator came
 //! from, so a failure here means saved ScreenForge scenes and Kulisse
 //! favorites would no longer look the same. Those lines use algorithm
-//! version 1; lines starting with `v2` pin what version 2 changed.
+//! version 1; lines starting with `v2` pin what version 2 changed, and
+//! styles added later (contours) follow at the end.
 //!
 //! After an intended visual change, rewrite the file with
 //! `PROSPEKT_BLESS=1 cargo test --test golden` and say so in the changelog.
@@ -49,6 +50,14 @@ fn lines() -> Vec<String> {
     }
     // Version 2 only changes the classic waves.
     out.extend(v2);
+    // Styles added later go last, so the lines above never move.
+    for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
+        for seed in [7u64, 42, 2026] {
+            let mut bg = GeneratedBackground { style: GeneratorStyle::Contours, mood, grain: 0.4, ..GeneratedBackground::new(seed) };
+            bg.palette = resolve_palette_for(&[], bg.color_strategy, bg.inverse_contrast, seed, bg.style, mood);
+            out.push(format!("Contours {mood:?} {seed} {:016x}", checksum(&bg, &regions)));
+        }
+    }
     out
 }
 

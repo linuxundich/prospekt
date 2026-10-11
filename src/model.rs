@@ -57,13 +57,23 @@ pub enum GeneratorStyle {
     Planes,
     Lines,
     Mist,
+    /// Paper-cut topography: nested contour layers of a smooth height
+    /// field. New in Prospekt 0.3.0.
+    Contours,
 }
 
 impl GeneratorStyle {
     /// The styles offered for new backgrounds and mixed variants — every
     /// style except the legacy `Waves`.
-    pub const MODERN: [GeneratorStyle; 6] =
-        [GeneratorStyle::Layers, GeneratorStyle::Arcs, GeneratorStyle::Ribbons, GeneratorStyle::Planes, GeneratorStyle::Lines, GeneratorStyle::Mist];
+    pub const MODERN: [GeneratorStyle; 7] = [
+        GeneratorStyle::Layers,
+        GeneratorStyle::Arcs,
+        GeneratorStyle::Ribbons,
+        GeneratorStyle::Planes,
+        GeneratorStyle::Lines,
+        GeneratorStyle::Mist,
+        GeneratorStyle::Contours,
+    ];
 }
 
 /// The lightness range a generated palette spans. Only affects how a palette

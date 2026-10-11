@@ -659,7 +659,8 @@ mod tests {
     #[test]
     fn mixed_variants_cover_every_modern_style() {
         let base = GeneratedBackground::new(5);
-        let styles: std::collections::HashSet<GeneratorStyle> = (0..6).map(|i| variant(&base, i, true).style).collect();
+        let n = GeneratorStyle::MODERN.len() as u64;
+        let styles: std::collections::HashSet<GeneratorStyle> = (0..n).map(|i| variant(&base, i, true).style).collect();
         assert_eq!(styles.len(), GeneratorStyle::MODERN.len());
     }
 

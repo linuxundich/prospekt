@@ -227,6 +227,7 @@ pub(crate) fn render(ctx: &Context, bg: &GeneratedBackground, width: f64, height
         GeneratorStyle::Ribbons => ribbons(ctx, bg, &geo, rng),
         GeneratorStyle::Planes => planes(ctx, bg, &geo, rng),
         GeneratorStyle::Lines => lines(ctx, bg, &geo, rng),
+        GeneratorStyle::Contours => contours(ctx, bg, &geo, rng),
         GeneratorStyle::Mist | GeneratorStyle::Waves => mist(ctx, bg, &geo, rng),
     }
 }
@@ -500,6 +501,203 @@ fn mist(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Re
         ctx.paint()?;
     }
     Ok(())
+}
+
+/// Paper-cut topography: a smooth height field of a few random hills,
+/// cut at evenly spaced heights. Each level is a layer of paper above the
+/// one below, lighter the higher it is, casting a soft shadow downhill.
+/// `density` sets the number of levels, `variation` the number of hills.
+fn contours(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let levels = count(bg.density, 6, 6);
+    let (ramp, _) = ramp_and_accent(&bg.palette, levels + 1);
+    base_gradient(ctx, geo, ramp[0], darken(ramp[0], 0.2), PI / 2.0)?;
+
+    let (w, h) = (geo.w, geo.h);
+    let variation = bg.variation.clamp(0.0, 1.0);
+    let hills: Vec<(f64, f64, f64, f64)> = (0..4 + (variation * 6.0).round() as usize)
+        .map(|_| (rng.range(-0.1, 1.1) * w, rng.range(-0.1, 1.1) * h, rng.range(0.1, 0.3) * geo.diag(), rng.range(0.4, 1.0)))
+        .collect();
+    let tilt = (rng.range(-0.3, 0.3), rng.range(-0.3, 0.3));
+    // A gentle ripple over the hills, so the outlines meander like real
+    // contour lines instead of tracing perfect ellipses.
+    let ripple = (rng.range(4.0, 7.0) / geo.diag(), rng.range(4.0, 7.0) / geo.diag(), rng.range(0.0, PI * 2.0), rng.range(0.0, PI * 2.0));
+    let ripple_amp = 0.04 + 0.08 * variation;
+    let height = |x: f64, y: f64| -> f64 {
+        let mut v = tilt.0 * (x / w - 0.5) + tilt.1 * (y / h - 0.5);
+        v += ripple_amp * (x * ripple.0 * PI * 2.0 + ripple.2).sin() * (y * ripple.1 * PI * 2.0 + ripple.3).cos();
+        for &(cx, cy, r, a) in &hills {
+            let d2 = (x - cx).powi(2) + (y - cy).powi(2);
+            v += a * (-d2 / (2.0 * r * r)).exp();
+        }
+        v
+    };
+
+    // Sample on a grid a little larger than the canvas; the outermost ring
+    // stays below every level, so every contour closes into a loop.
+    let nx = 120usize;
+    let ny = ((nx as f64 * h / w).round() as usize).clamp(24, 240);
+    let (x0, y0) = (-0.12 * w, -0.12 * h);
+    let (dx, dy) = (1.24 * w / nx as f64, 1.24 * h / ny as f64);
+    let mut grid = vec![0.0; (nx + 1) * (ny + 1)];
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for j in 0..=ny {
+        for i in 0..=nx {
+            let v = height(x0 + i as f64 * dx, y0 + j as f64 * dy);
+            grid[j * (nx + 1) + i] = v;
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+    }
+    let span = (hi - lo).max(1e-9);
+    for v in grid.iter_mut() {
+        *v = (*v - lo) / span;
+    }
+    for j in 0..=ny {
+        for i in 0..=nx {
+            if i == 0 || j == 0 || i == nx || j == ny {
+                grid[j * (nx + 1) + i] = -1.0;
+            }
+        }
+    }
+
+    let (blur, alpha) = shadow_params(bg, geo);
+    let shadow_offset = geo.v((geo.u * 0.004, geo.u * 0.012));
+    for l in 0..levels {
+        let level = (l as f64 + 1.0) / (levels as f64 + 1.0);
+        let loops: Vec<Vec<(f64, f64)>> = contour_loops(&grid, nx, ny, level)
+            .into_iter()
+            .filter(|lp| lp.len() >= 4)
+            .map(|lp| lp.into_iter().map(|(gx, gy)| geo.p((x0 + gx * dx, y0 + gy * dy))).collect())
+            .collect();
+        if loops.is_empty() {
+            continue;
+        }
+        let build = |c: &Context| {
+            c.set_fill_rule(cairo::FillRule::EvenOdd);
+            for lp in &loops {
+                smooth_closed(c, lp);
+            }
+        };
+        cast_shadow(ctx, geo, &build, shadow_offset, blur, alpha)?;
+        ctx.save()?;
+        ctx.new_path();
+        build(ctx);
+        let color = ramp[l + 1];
+        ctx.set_source(&linear(geo.p((w / 2.0, 0.0)), geo.p((w / 2.0, h)), &[(0.0, lighten(color, 0.08)), (1.0, color)]))?;
+        ctx.fill()?;
+        ctx.restore()?;
+    }
+    Ok(())
+}
+
+/// A closed smooth curve through `points` (Catmull-Rom, wrapping around).
+fn smooth_closed(ctx: &Context, points: &[(f64, f64)]) {
+    let n = points.len();
+    if n < 3 {
+        return;
+    }
+    ctx.move_to(points[0].0, points[0].1);
+    for i in 0..n {
+        let p0 = points[(i + n - 1) % n];
+        let (p1, p2) = (points[i], points[(i + 1) % n]);
+        let p3 = points[(i + 2) % n];
+        ctx.curve_to(
+            p1.0 + (p2.0 - p0.0) / 6.0,
+            p1.1 + (p2.1 - p0.1) / 6.0,
+            p2.0 - (p3.0 - p1.0) / 6.0,
+            p2.1 - (p3.1 - p1.1) / 6.0,
+            p2.0,
+            p2.1,
+        );
+    }
+    ctx.close_path();
+}
+
+/// The closed outlines of `grid > level` (marching squares), in grid
+/// coordinates. `grid` is row-major with `(nx + 1) * (ny + 1)` values and
+/// lies below `level` along its border, so every outline closes.
+fn contour_loops(grid: &[f64], nx: usize, ny: usize, level: f64) -> Vec<Vec<(f64, f64)>> {
+    use std::collections::HashMap;
+    // An edge of the grid: (i, j, 0) runs right from (i, j), (i, j, 1) down.
+    type Edge = (usize, usize, u8);
+    let at = |i: usize, j: usize| grid[j * (nx + 1) + i];
+    let point = |e: Edge| -> (f64, f64) {
+        let (i, j, d) = e;
+        let (a, b) = if d == 0 { (at(i, j), at(i + 1, j)) } else { (at(i, j), at(i, j + 1)) };
+        let t = ((level - a) / (b - a)).clamp(0.0, 1.0);
+        if d == 0 {
+            (i as f64 + t, j as f64)
+        } else {
+            (i as f64, j as f64 + t)
+        }
+    };
+    let mut links: HashMap<Edge, Vec<Edge>> = HashMap::new();
+    let mut link = |a: Edge, b: Edge| {
+        links.entry(a).or_default().push(b);
+        links.entry(b).or_default().push(a);
+    };
+    for j in 0..ny {
+        for i in 0..nx {
+            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            let case = ((a > level) as u8) << 3 | ((b > level) as u8) << 2 | ((c > level) as u8) << 1 | (d > level) as u8;
+            let (top, right, bottom, left) = ((i, j, 0), (i + 1, j, 1), (i, j + 1, 0), (i, j, 1));
+            let center_above = (a + b + c + d) / 4.0 > level;
+            match case {
+                1 | 14 => link(left, bottom),
+                2 | 13 => link(bottom, right),
+                3 | 12 => link(left, right),
+                4 | 11 => link(top, right),
+                6 | 9 => link(top, bottom),
+                7 | 8 => link(left, top),
+                5 => {
+                    if center_above {
+                        link(left, top);
+                        link(right, bottom);
+                    } else {
+                        link(top, right);
+                        link(left, bottom);
+                    }
+                }
+                10 => {
+                    if center_above {
+                        link(top, right);
+                        link(left, bottom);
+                    } else {
+                        link(left, top);
+                        link(right, bottom);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // Walk the links into loops, in a fixed order so the result is
+    // deterministic.
+    let mut starts: Vec<Edge> = links.keys().copied().collect();
+    starts.sort_unstable();
+    let mut seen = std::collections::HashSet::new();
+    let mut loops = Vec::new();
+    for start in starts {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut lp = Vec::new();
+        let (mut prev, mut cur) = (start, start);
+        loop {
+            seen.insert(cur);
+            lp.push(point(cur));
+            let next = links[&cur].iter().copied().find(|&e| e != prev && !seen.contains(&e));
+            match next {
+                Some(e) => {
+                    prev = cur;
+                    cur = e;
+                }
+                None => break,
+            }
+        }
+        loops.push(lp);
+    }
+    loops
 }
 
 /// Overlays deterministic film grain on the `width`×`height` canvas:

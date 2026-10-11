@@ -1,0 +1,19 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cairo
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Release mode: the golden test renders 153 backgrounds, and the
+      # render-time checks are meant for optimized builds anyway.
+      - name: Test, including the golden pixel test
+        run: cargo test --release --all-targets

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Added
+
+- Contours style (`GeneratorStyle::Contours`): a smooth height field of
+  random hills cut into paper layers, like a relief map. `density` sets
+  the number of levels, `variation` the number of hills and how much the
+  outlines meander.
+- GitHub Actions run all tests, the golden pixel test included, on every
+  push.
+- Golden lines for the contours style.
+
+### Changed
+
+- `GeneratorStyle::MODERN` includes contours, so mixed variants
+  (`variant(…, true)`) now cycle through seven styles; existing
+  backgrounds render exactly as before.
+
 ## [0.2.0] - 2026-10-11
 
 ### Added
