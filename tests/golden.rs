@@ -1,8 +1,8 @@
 //! Pins the exact pixels of a spread of backgrounds. The reference
 //! checksums were taken from ScreenForge 0.34.0, where this generator came
 //! from, so a failure here means saved ScreenForge scenes and Kulisse
-//! favorites would no longer look the same. (ScreenForge 0.34.1 and later
-//! draw the classic waves smooth, which here is `smooth_waves: true`.)
+//! favorites would no longer look the same. Those lines use algorithm
+//! version 1; lines starting with `v2` pin what version 2 changed.
 //!
 //! After an intended visual change, rewrite the file with
 //! `PROSPEKT_BLESS=1 cargo test --test golden` and say so in the changelog.
@@ -32,17 +32,23 @@ fn checksum(bg: &GeneratedBackground, regions: &[Region]) -> u64 {
 fn lines() -> Vec<String> {
     let regions = [Region { x: 150.0, y: 40.0, width: 100.0, height: 130.0 }];
     let mut out = Vec::new();
+    let mut v2 = Vec::new();
     for style in STYLES {
         for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
             for seed in [7u64, 42, 2026] {
                 for avoid in [false, true] {
-                    let mut bg = GeneratedBackground { style, mood, adapt_to_screenshots: avoid, grain: 0.4, ..GeneratedBackground::new(seed) };
+                    let mut bg = GeneratedBackground { style, mood, adapt_to_screenshots: avoid, grain: 0.4, version: 1, ..GeneratedBackground::new(seed) };
                     bg.palette = resolve_palette_for(&[], bg.color_strategy, bg.inverse_contrast, seed, style, mood);
                     out.push(format!("{style:?} {mood:?} {seed} {avoid} {:016x}", checksum(&bg, &regions)));
+                    if style == GeneratorStyle::Waves {
+                        v2.push(format!("v2 {style:?} {mood:?} {seed} {avoid} {:016x}", checksum(&GeneratedBackground { version: 2, ..bg }, &regions)));
+                    }
                 }
             }
         }
     }
+    // Version 2 only changes the classic waves.
+    out.extend(v2);
     out
 }
 

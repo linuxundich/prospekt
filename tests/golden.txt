@@ -124,3 +124,21 @@ Mist Dark 42 false 5f75e1653cef8ee4
 Mist Dark 42 true 5f75e1653cef8ee4
 Mist Dark 2026 false d13381cc3c86d4c2
 Mist Dark 2026 true d13381cc3c86d4c2
+v2 Waves Vivid 7 false 2afa013aade3e317
+v2 Waves Vivid 7 true 910c576ebcc2d30e
+v2 Waves Vivid 42 false 2f241cda541dca41
+v2 Waves Vivid 42 true 4f943eec1f9f6167
+v2 Waves Vivid 2026 false d59fff4e3d191a11
+v2 Waves Vivid 2026 true 7163e7c653124d9f
+v2 Waves Light 7 false 2afa013aade3e317
+v2 Waves Light 7 true 910c576ebcc2d30e
+v2 Waves Light 42 false 2f241cda541dca41
+v2 Waves Light 42 true 4f943eec1f9f6167
+v2 Waves Light 2026 false d59fff4e3d191a11
+v2 Waves Light 2026 true 7163e7c653124d9f
+v2 Waves Dark 7 false 2afa013aade3e317
+v2 Waves Dark 7 true 910c576ebcc2d30e
+v2 Waves Dark 42 false 2f241cda541dca41
+v2 Waves Dark 42 true 4f943eec1f9f6167
+v2 Waves Dark 2026 false d59fff4e3d191a11
+v2 Waves Dark 2026 true 7163e7c653124d9f

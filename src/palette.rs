@@ -269,6 +269,12 @@ pub fn resolve_palette_for(
 /// Dark yellows read as olive or mud, so dark and vivid ramps shift a hue
 /// in that band toward orange or green, and a vivid ramp in the yellow
 /// band starts lighter.
+/// The hue (radians) [`mood_palette`] picks for `seed` when given none, so
+/// an app can derive further palettes around the same random hue.
+pub fn chance_hue(seed: u64) -> f64 {
+    crate::rng::Rng::new(seed ^ 0x6D6F_6F64_7061_6C65).range(0.0, PI * 2.0).rem_euclid(PI * 2.0)
+}
+
 pub fn mood_palette(seed: u64, mood: Mood, hue: Option<f64>, chroma_gain: f64) -> Vec<Rgba> {
     let mut rng = crate::rng::Rng::new(seed ^ 0x6D6F_6F64_7061_6C65);
     let mut hue = hue.unwrap_or_else(|| rng.range(0.0, PI * 2.0)).rem_euclid(PI * 2.0);
@@ -387,6 +393,17 @@ mod tests {
         let af = a as f64 / 255.0;
         let (pr, pg, pb) = ((r as f64 * af) as u8, (g as f64 * af) as u8, (b as f64 * af) as u8);
         [pb, pg, pr, a].repeat((w * h) as usize)
+    }
+
+    #[test]
+    fn chance_hue_is_the_hue_mood_palette_picks() {
+        for seed in [1u64, 42, 2026] {
+            let ramp = mood_palette(seed, Mood::Vivid, None, 1.0);
+            let (_, a, b) = rgb_to_oklab(ramp[0]);
+            let measured = b.atan2(a).rem_euclid(PI * 2.0);
+            let diff = (measured - chance_hue(seed)).abs();
+            assert!(diff < 0.35 || (PI * 2.0 - diff) < 0.35, "seed {seed}: {measured} vs {}", chance_hue(seed));
+        }
     }
 
     #[test]

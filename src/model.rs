@@ -152,19 +152,31 @@ pub struct GeneratedBackground {
     /// banding. `0.0` for old projects, which had none.
     #[serde(default)]
     pub grain: f64,
-    /// Draws the classic waves (`GeneratorStyle::Waves`) as smooth curves
-    /// through many points instead of a 24-point polygon. Off by default,
-    /// so backgrounds saved before it existed (ScreenForge scenes) keep
-    /// their exact pixels; Kulisse always turns it on.
-    #[serde(default)]
-    pub smooth_waves: bool,
+    /// Which revision of the drawing algorithms this background uses. A
+    /// change that would alter how saved backgrounds look only applies
+    /// from the version that introduced it, so saved scenes keep their
+    /// pixels while new backgrounds ([`GeneratedBackground::new`]) get the
+    /// improvements. Data saved before the field existed loads as 1.
+    ///
+    /// - 1: as in ScreenForge 0.34.0.
+    /// - 2: the classic waves are smooth curves instead of a 24-point
+    ///   polygon.
+    #[serde(default = "first_version")]
+    pub version: u32,
 }
 
 fn default_generated_scale() -> f64 {
     1.0
 }
 
+fn first_version() -> u32 {
+    1
+}
+
 impl GeneratedBackground {
+    /// The newest algorithm version; see [`GeneratedBackground::version`].
+    pub const LATEST_VERSION: u32 = 2;
+
     /// A fresh background with reasonable defaults — restrained enough
     /// that the very first "Generate" click already looks intentional,
     /// not just technically valid. `color_strategy` defaults to `Random`
@@ -192,7 +204,7 @@ impl GeneratedBackground {
             style: GeneratorStyle::Layers,
             mood: Mood::Vivid,
             grain: 0.35,
-            smooth_waves: false,
+            version: GeneratedBackground::LATEST_VERSION,
         }
     }
 }

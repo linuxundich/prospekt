@@ -446,10 +446,11 @@ fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, pale
 
     let amplitude = max_radius * 0.05 * (0.3 + bg.flow.clamp(0.0, 1.0) * 0.7);
     let freq = 1.0 + (bg.variation.clamp(0.0, 1.0) * 3.0).round();
-    // The classic look samples 24 points across the whole sweep and joins
-    // them with straight lines; `smooth_waves` samples far more and draws
-    // a curve through them, so no corners show at any size.
-    let segments = if bg.smooth_waves { 120 } else { 24 };
+    // Version 1 samples 24 points across the whole sweep and joins them
+    // with straight lines; from version 2 on far more points are sampled
+    // and a curve drawn through them, so no corners show at any size.
+    let smooth = bg.version >= 2;
+    let segments = if smooth { 120 } else { 24 };
 
     let contrast = bg.contrast.clamp(0.0, 1.0);
     let (oklab_stops, mean_l) = oklab_palette(palette);
@@ -486,7 +487,7 @@ fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, pale
 
         ctx.new_path();
         ctx.move_to(focus.0, focus.1);
-        if bg.smooth_waves {
+        if smooth {
             crate::styles::smooth(ctx, &points, false);
         } else {
             for &(x, y) in &points {
@@ -538,9 +539,9 @@ mod tests {
     }
 
     #[test]
-    fn smooth_waves_change_the_outline_and_stay_deterministic() {
-        let corner = GeneratedBackground { style: GeneratorStyle::Waves, ..sample_background(5, 0.5) };
-        let smooth = GeneratedBackground { smooth_waves: true, ..corner.clone() };
+    fn version_2_smooths_the_waves_and_stays_deterministic() {
+        let corner = GeneratedBackground { style: GeneratorStyle::Waves, version: 1, ..sample_background(5, 0.5) };
+        let smooth = GeneratedBackground { version: 2, ..corner.clone() };
         assert_ne!(render_to_checksum(&corner, &[]), render_to_checksum(&smooth, &[]));
         assert_eq!(render_to_checksum(&smooth, &[]), render_to_checksum(&smooth, &[]));
     }
@@ -585,8 +586,11 @@ mod tests {
             let _ = render_to_checksum(&bg, &[]);
             let elapsed = start.elapsed();
             assert!(
-                elapsed.as_millis() < 2000,
-                "corner_bias={corner_bias} took {elapsed:?} — expected well under a second even in a debug build"
+                // About 0.7 s in a debug build on its own; the margin is for
+                // the other tests sharing the CPU. The bug this guards
+                // against took several seconds per layer.
+                elapsed.as_millis() < 5000,
+                "corner_bias={corner_bias} took {elapsed:?} — expected about a second even in a debug build"
             );
         }
     }
