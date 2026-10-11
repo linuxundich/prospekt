@@ -9,6 +9,14 @@
   and <a href="https://github.com/linuxundich/ScreenForge">ScreenForge</a> (screenshot compositions).
 </p>
 
+<p align="center">
+  <img src="docs/examples/arcs.jpg" alt="Concentric arcs in shades of teal, rising from the left edge" width="32%">
+  <img src="docs/examples/ribbons.jpg" alt="A gold and two blue silk ribbons crossing a pale blue background" width="32%">
+  <img src="docs/examples/layers-dark.jpg" alt="Dark layered paper waves in deep berry tones" width="32%">
+</p>
+
+<p align="center"><sub>Arcs (seed 2026), ribbons (seed 7) and layers in the dark mood (seed 1337), rendered with <code>cargo run --release --example showcase</code>.</sub></p>
+
 A *Prospekt* is the painted backdrop at the back of a theatre stage.
 
 ## How it works
@@ -47,6 +55,7 @@ A golden test pins the exact pixels of 126 backgrounds. A change that alters any
 cargo test                                   # includes the golden test
 PROSPEKT_BLESS=1 cargo test --test golden     # rewrite after an intended change
 cargo run --release --example timing         # render times per style
+cargo run --release --example showcase DIR   # the README pictures as PNG
 ```
 
 ## License
