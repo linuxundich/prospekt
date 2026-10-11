@@ -2,7 +2,7 @@
 use cairo::{Context, Format, ImageSurface};
 use prospekt::{palette, GeneratedBackground, GeneratorStyle};
 fn main() {
-    for style in [GeneratorStyle::Waves, GeneratorStyle::Layers, GeneratorStyle::Arcs, GeneratorStyle::Ribbons, GeneratorStyle::Planes, GeneratorStyle::Lines, GeneratorStyle::Mist, GeneratorStyle::Contours] {
+    for style in [GeneratorStyle::Waves, GeneratorStyle::Layers, GeneratorStyle::Arcs, GeneratorStyle::Ribbons, GeneratorStyle::Planes, GeneratorStyle::Lines, GeneratorStyle::Mist, GeneratorStyle::Contours, GeneratorStyle::Blobs, GeneratorStyle::Mesh, GeneratorStyle::LowPoly, GeneratorStyle::Bauhaus] {
         let mut bg = GeneratedBackground { style, ..GeneratedBackground::new(42) };
         bg.palette = palette::resolve_palette_for(&[], bg.color_strategy, 0.5, 42, style, bg.mood);
         let mut row = format!("{style:?}:");

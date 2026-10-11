@@ -228,6 +228,10 @@ pub(crate) fn render(ctx: &Context, bg: &GeneratedBackground, width: f64, height
         GeneratorStyle::Planes => planes(ctx, bg, &geo, rng),
         GeneratorStyle::Lines => lines(ctx, bg, &geo, rng),
         GeneratorStyle::Contours => contours(ctx, bg, &geo, rng),
+        GeneratorStyle::Blobs => blobs(ctx, bg, &geo, rng),
+        GeneratorStyle::Mesh => mesh(ctx, bg, &geo, rng),
+        GeneratorStyle::LowPoly => low_poly(ctx, bg, &geo, rng),
+        GeneratorStyle::Bauhaus => bauhaus(ctx, bg, &geo, rng),
         GeneratorStyle::Mist | GeneratorStyle::Waves => mist(ctx, bg, &geo, rng),
     }
 }
@@ -586,6 +590,334 @@ fn contours(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -
         ctx.set_source(&linear(geo.p((w / 2.0, 0.0)), geo.p((w / 2.0, h)), &[(0.0, lighten(color, 0.08)), (1.0, color)]))?;
         ctx.fill()?;
         ctx.restore()?;
+    }
+    Ok(())
+}
+
+/// Applies the scene transform (rotation, zoom, offset) to `c`, so shapes
+/// can be drawn in plain canvas coordinates; the same mapping as
+/// [`Geo::p`].
+fn scene_transform(c: &Context, geo: &Geo) {
+    let (cx, cy) = (geo.w / 2.0, geo.h / 2.0);
+    c.translate(cx + geo.shift.0, cy + geo.shift.1);
+    c.rotate(geo.rot);
+    c.scale(geo.scale, geo.scale);
+    c.translate(-cx, -cy);
+}
+
+/// The color at `t` (0–1) along `ramp`, mixed between neighbors.
+fn ramp_at(ramp: &[Rgba], t: f64) -> Rgba {
+    if ramp.len() == 1 {
+        return ramp[0];
+    }
+    let x = t.clamp(0.0, 1.0) * (ramp.len() - 1) as f64;
+    let i = (x.floor() as usize).min(ramp.len() - 2);
+    mix(ramp[i], ramp[i + 1], x - i as f64)
+}
+
+/// Organic rounded shapes floating over each other, the largest and
+/// darkest at the back, one in the accent color, each casting a shadow.
+/// `density` sets how many, `variation` how far they stray from circles.
+fn blobs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let n = count(bg.density, 4, 5);
+    let (ramp, accent) = ramp_and_accent(&bg.palette, n + 1);
+    base_gradient(ctx, geo, lighten(ramp[n], 0.12), ramp[n], PI * 0.3)?;
+    let (w, h) = (geo.w, geo.h);
+    let variation = bg.variation.clamp(0.0, 1.0);
+    let accent_at = rng.index(n);
+    let (blur, alpha) = shadow_params(bg, geo);
+    let offset = geo.v((geo.u * 0.004, geo.u * 0.016));
+    // Spread the centers evenly over the canvas (the R2 low-discrepancy
+    // sequence from a random start), so the blobs neither clump nor leave
+    // part of the canvas empty.
+    let (sx, sy) = (rng.range(0.0, 1.0), rng.range(0.0, 1.0));
+    for i in 0..n {
+        let t = i as f64 / n as f64;
+        let fx = (sx + (i + 1) as f64 * 0.754_877_666).fract();
+        let fy = (sy + (i + 1) as f64 * 0.569_840_291).fract();
+        let (cx, cy) = ((0.05 + 0.9 * fx + rng.range(-0.06, 0.06)) * w, (0.05 + 0.9 * fy + rng.range(-0.06, 0.06)) * h);
+        let r = geo.u * rng.range(0.24, 0.48) * (1.0 - 0.4 * t);
+        let k = 9;
+        let points: Vec<(f64, f64)> = (0..k)
+            .map(|j| {
+                let a = PI * 2.0 * j as f64 / k as f64 + rng.range(-0.15, 0.15);
+                let rr = r * (1.0 + variation * rng.range(-0.38, 0.38));
+                (cx + a.cos() * rr, cy + a.sin() * rr)
+            })
+            .collect();
+        let build = |c: &Context| {
+            c.save().ok();
+            scene_transform(c, geo);
+            smooth_closed(c, &points);
+            c.restore().ok();
+        };
+        cast_shadow(ctx, geo, &build, offset, blur, alpha)?;
+        ctx.new_path();
+        build(ctx);
+        let color = if i == accent_at { accent } else { ramp[i] };
+        ctx.set_source(&linear(geo.p((cx - r, cy - r)), geo.p((cx + r, cy + r)), &[(0.0, lighten(color, 0.14)), (1.0, color)]))?;
+        ctx.fill()?;
+    }
+    Ok(())
+}
+
+/// A soft mesh gradient: a few color points on a loosely bent grid,
+/// blended smoothly between them (Cairo's mesh pattern). `density` sets
+/// the number of color points, `variation` how far the grid bends,
+/// `contrast` how often the accent color appears.
+fn mesh(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let (ramp, accent) = ramp_and_accent(&bg.palette, 5);
+    let (w, h) = (geo.w, geo.h);
+    ctx.set_source_rgb(ramp[2].r, ramp[2].g, ramp[2].b);
+    ctx.paint()?;
+    let cols = 2 + (bg.density.clamp(0.0, 1.0) * 2.0).round() as usize;
+    let rows = cols;
+    let (x0, y0, cw, ch) = (-0.25 * w, -0.25 * h, 1.5 * w / cols as f64, 1.5 * h / rows as f64);
+    let bend = bg.variation.clamp(0.0, 1.0) * 0.22;
+    let mut pts = vec![(0.0, 0.0); (cols + 1) * (rows + 1)];
+    let mut colors = vec![ramp[0]; (cols + 1) * (rows + 1)];
+    // Colors run along a random direction through the palette, nudged per
+    // point, so the gradient flows instead of turning muddy; one inner
+    // point may carry the accent.
+    let angle = rng.range(0.0, PI * 2.0);
+    let (dx, dy) = (angle.cos(), angle.sin());
+    for j in 0..=rows {
+        for i in 0..=cols {
+            let edge = i == 0 || j == 0 || i == cols || j == rows;
+            let jitter = if edge { 0.0 } else { bend };
+            pts[j * (cols + 1) + i] = (x0 + (i as f64 + rng.range(-jitter, jitter)) * cw, y0 + (j as f64 + rng.range(-jitter, jitter)) * ch);
+            let (u, v) = (i as f64 / cols as f64 - 0.5, j as f64 / rows as f64 - 0.5);
+            let t = 0.5 + (u * dx + v * dy) * 1.2 + rng.range(-0.2, 0.2);
+            colors[j * (cols + 1) + i] = ramp_at(&ramp, t);
+        }
+    }
+    // The accent gives a mesh gradient its glow; with more depth a second
+    // point carries a lighter mix of it.
+    let (ai, aj) = (1 + rng.index(cols - 1), 1 + rng.index(rows - 1));
+    colors[aj * (cols + 1) + ai] = accent;
+    if rng.chance(bg.contrast.clamp(0.0, 1.0)) {
+        let (bi, bj) = (rng.index(cols + 1), rng.index(rows + 1));
+        if (bi, bj) != (ai, aj) {
+            colors[bj * (cols + 1) + bi] = mix(accent, ramp[4], 0.5);
+        }
+    }
+    let p = |i: usize, j: usize| pts[j * (cols + 1) + i];
+    // Each grid edge bends once, the same way for both patches that share
+    // it, so no seams open between patches.
+    let mut bow = std::collections::HashMap::new();
+    for j in 0..=rows {
+        for i in 0..=cols {
+            bow.insert((i, j, 0u8), (rng.range(-bend, bend) * ch, rng.range(-bend, bend) * ch));
+            bow.insert((i, j, 1u8), (rng.range(-bend, bend) * cw, rng.range(-bend, bend) * cw));
+        }
+    }
+    let controls = |a: (f64, f64), b: (f64, f64), key: (usize, usize, u8)| {
+        let (o1, o2) = bow[&key];
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = dx.hypot(dy).max(1e-9);
+        let (nx, ny) = (-dy / len, dx / len);
+        ((a.0 + dx / 3.0 + nx * o1, a.1 + dy / 3.0 + ny * o1), (a.0 + dx * 2.0 / 3.0 + nx * o2, a.1 + dy * 2.0 / 3.0 + ny * o2))
+    };
+    let mesh = cairo::Mesh::new();
+    for j in 0..rows {
+        for i in 0..cols {
+            let (a, b, c, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
+            mesh.begin_patch();
+            mesh.move_to(a.0, a.1);
+            let (k1, k2) = controls(a, b, (i, j, 0));
+            mesh.curve_to(k1.0, k1.1, k2.0, k2.1, b.0, b.1);
+            let (k1, k2) = controls(b, c, (i + 1, j, 1));
+            mesh.curve_to(k1.0, k1.1, k2.0, k2.1, c.0, c.1);
+            let (k1, k2) = controls(d, c, (i, j + 1, 0));
+            mesh.curve_to(k2.0, k2.1, k1.0, k1.1, d.0, d.1);
+            let (k1, k2) = controls(a, d, (i, j, 1));
+            mesh.curve_to(k2.0, k2.1, k1.0, k1.1, a.0, a.1);
+            for (corner, (ci, cj)) in [
+                (cairo::MeshCorner::MeshCorner0, (i, j)),
+                (cairo::MeshCorner::MeshCorner1, (i + 1, j)),
+                (cairo::MeshCorner::MeshCorner2, (i + 1, j + 1)),
+                (cairo::MeshCorner::MeshCorner3, (i, j + 1)),
+            ] {
+                let col = colors[cj * (cols + 1) + ci];
+                mesh.set_corner_color_rgb(corner, col.r, col.g, col.b);
+            }
+            mesh.end_patch();
+        }
+    }
+    // Rendered small, softened and scaled up: the patches' bilinear color
+    // blend would otherwise show creases around the color points.
+    let small = 0.25;
+    let (sw, sh) = (((w * small).ceil() as i32).max(1), ((h * small).ceil() as i32).max(1));
+    let mut surface = ImageSurface::create(Format::ARgb32, sw, sh)?;
+    {
+        let sctx = Context::new(&surface)?;
+        sctx.set_source_rgb(ramp[2].r, ramp[2].g, ramp[2].b);
+        sctx.paint()?;
+        sctx.scale(small, small);
+        scene_transform(&sctx, geo);
+        sctx.set_source(&mesh)?;
+        sctx.paint()?;
+    }
+    let radius = (sw.min(sh) as f64 / 14.0).max(1.0);
+    {
+        let stride = surface.stride();
+        let mut data = surface.data()?;
+        crate::blur::box_blur(&mut data, sw, sh, stride, radius);
+    }
+    ctx.save()?;
+    ctx.scale(1.0 / small, 1.0 / small);
+    ctx.set_source_surface(&surface, 0.0, 0.0)?;
+    ctx.source().set_filter(cairo::Filter::Good);
+    ctx.source().set_extend(cairo::Extend::Pad);
+    ctx.paint()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+/// Faceted triangles over a loosely jittered grid, colored along a
+/// gradient through the palette, each facet a little lighter or darker,
+/// a few tinted with the accent. `density` sets the facet size,
+/// `variation` the jitter, `contrast` the facet shading.
+fn low_poly(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let (ramp, accent) = ramp_and_accent(&bg.palette, 6);
+    let (w, h) = (geo.w, geo.h);
+    let cols = count(bg.density, 7, 9);
+    let cell = 1.3 * w.max(h) / cols as f64;
+    let (nx, ny) = (((1.3 * w) / cell).ceil() as usize, ((1.3 * h) / cell).ceil() as usize);
+    let (x0, y0) = (w / 2.0 - nx as f64 * cell / 2.0, h / 2.0 - ny as f64 * cell / 2.0);
+    let jitter = 0.45 * bg.variation.clamp(0.0, 1.0) * cell;
+    let pts: Vec<(f64, f64)> =
+        (0..=ny).flat_map(|j| (0..=nx).map(move |i| (i, j))).map(|(i, j)| (x0 + i as f64 * cell + rng.range(-jitter, jitter), y0 + j as f64 * cell + rng.range(-jitter, jitter))).collect();
+    let p = |i: usize, j: usize| pts[j * (nx + 1) + i];
+    let angle = rng.range(0.0, PI * 2.0);
+    let (dirx, diry) = (angle.cos(), angle.sin());
+    let half = 0.5 * (w * dirx.abs() + h * diry.abs()).max(1.0);
+    let shade = 0.04 + 0.12 * bg.contrast.clamp(0.0, 1.0);
+    ctx.set_source_rgb(ramp[2].r, ramp[2].g, ramp[2].b);
+    ctx.paint()?;
+    ctx.save()?;
+    scene_transform(ctx, geo);
+    ctx.set_line_join(cairo::LineJoin::Round);
+    ctx.set_line_width(1.0 / geo.scale);
+    for j in 0..ny {
+        for i in 0..nx {
+            let (a, b, c, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
+            let tris = if rng.chance(0.5) { [[a, b, c], [a, c, d]] } else { [[a, b, d], [b, c, d]] };
+            for tri in tris {
+                let (mx, my) = ((tri[0].0 + tri[1].0 + tri[2].0) / 3.0, (tri[0].1 + tri[1].1 + tri[2].1) / 3.0);
+                let t = 0.5 + ((mx - w / 2.0) * dirx + (my - h / 2.0) * diry) / (2.0 * half);
+                let mut color = ramp_at(&ramp, t);
+                let delta = rng.range(-shade, shade);
+                color = if delta >= 0.0 { lighten(color, delta) } else { darken(color, -delta) };
+                if rng.chance(0.03) {
+                    color = mix(color, accent, 0.6);
+                }
+                ctx.move_to(tri[0].0, tri[0].1);
+                ctx.line_to(tri[1].0, tri[1].1);
+                ctx.line_to(tri[2].0, tri[2].1);
+                ctx.close_path();
+                ctx.set_source_rgb(color.r, color.g, color.b);
+                // Stroke in the same color, so no hairline gaps show
+                // between neighboring facets.
+                ctx.fill_preserve()?;
+                ctx.stroke()?;
+            }
+        }
+    }
+    ctx.restore()?;
+    Ok(())
+}
+
+/// Flat geometric shapes on a grid, after Bauhaus posters: quarter and
+/// half circles, circles, triangles and bars, some on a colored square,
+/// with a light shadow. `density` sets the grid size, `variation` how
+/// busy the cells are.
+fn bauhaus(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let (ramp, accent) = ramp_and_accent(&bg.palette, 5);
+    let ground = lighten(ramp[4], 0.06);
+    ctx.set_source_rgb(ground.r, ground.g, ground.b);
+    ctx.paint()?;
+    let (w, h) = (geo.w, geo.h);
+    let cols = count(bg.density, 3, 3);
+    let cell = w.max(h) / cols as f64;
+    let (nx, ny) = ((w / cell).ceil() as usize + 1, (h / cell).ceil() as usize + 1);
+    let (x0, y0) = (w / 2.0 - nx as f64 * cell / 2.0, h / 2.0 - ny as f64 * cell / 2.0);
+    let palette = [ramp[0], ramp[1], ramp[2], ramp[3], accent];
+    let busy = 0.55 + 0.4 * bg.variation.clamp(0.0, 1.0);
+    let (blur, alpha) = shadow_params(bg, geo);
+    let offset = geo.v((geo.u * 0.004, geo.u * 0.01));
+    for j in 0..ny {
+        for i in 0..nx {
+            let (x, y) = (x0 + i as f64 * cell, y0 + j as f64 * cell);
+            let fill = |c: &Context, col: Rgba| -> Result<(), RenderError> {
+                c.set_source_rgb(col.r, col.g, col.b);
+                c.fill()?;
+                Ok(())
+            };
+            if rng.chance(0.45) {
+                ctx.save()?;
+                scene_transform(ctx, geo);
+                ctx.rectangle(x, y, cell, cell);
+                ctx.restore()?;
+                fill(ctx, palette[rng.index(4)])?;
+            }
+            if !rng.chance(busy) {
+                continue;
+            }
+            let kind = rng.index(5);
+            let corner = rng.index(4);
+            let (cx, cy) = [(x, y), (x + cell, y), (x + cell, y + cell), (x, y + cell)][corner];
+            let start = corner as f64 * PI / 2.0;
+            let bars = 3;
+            let build = |c: &Context| {
+                c.save().ok();
+                scene_transform(c, geo);
+                match kind {
+                    0 => {
+                        // Quarter circle filling the cell from a corner.
+                        c.move_to(cx, cy);
+                        c.arc(cx, cy, cell, start, start + PI / 2.0);
+                        c.close_path();
+                    }
+                    1 => {
+                        // Half circle standing on one side.
+                        let (mx, my) = [(x + cell / 2.0, y), (x + cell, y + cell / 2.0), (x + cell / 2.0, y + cell), (x, y + cell / 2.0)][corner];
+                        c.move_to(mx, my);
+                        c.arc(mx, my, cell / 2.0, start, start + PI);
+                        c.close_path();
+                    }
+                    2 => {
+                        c.new_sub_path();
+                        c.arc(x + cell / 2.0, y + cell / 2.0, cell * 0.36, 0.0, PI * 2.0);
+                    }
+                    3 => {
+                        // Half the square along a diagonal.
+                        let pts = [(x, y), (x + cell, y), (x + cell, y + cell), (x, y + cell)];
+                        c.move_to(pts[corner].0, pts[corner].1);
+                        c.line_to(pts[(corner + 1) % 4].0, pts[(corner + 1) % 4].1);
+                        c.line_to(pts[(corner + 3) % 4].0, pts[(corner + 3) % 4].1);
+                        c.close_path();
+                    }
+                    _ => {
+                        // Parallel bars across the cell.
+                        let gap = cell / (bars * 2 + 1) as f64;
+                        for b in 0..bars {
+                            let o = gap * (1 + 2 * b) as f64;
+                            if corner % 2 == 0 {
+                                c.rectangle(x + gap, y + o, cell - 2.0 * gap, gap);
+                            } else {
+                                c.rectangle(x + o, y + gap, gap, cell - 2.0 * gap);
+                            }
+                        }
+                    }
+                }
+                c.restore().ok();
+            };
+            cast_shadow(ctx, geo, &build, offset, blur * 0.6, alpha * 0.6)?;
+            ctx.new_path();
+            build(ctx);
+            fill(ctx, palette[rng.index(palette.len())])?;
+        }
     }
     Ok(())
 }

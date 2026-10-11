@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+### Added
+
+- Four styles:
+  - `Blobs`: organic rounded shapes over each other with soft shadows,
+    one in the accent color.
+  - `Mesh`: a soft mesh gradient of a few color points that flow along
+    the palette, always with an accent glow.
+  - `LowPoly`: faceted triangles shaded along a gradient.
+  - `Bauhaus`: flat geometric shapes on a grid (quarter and half circles,
+    circles, triangles, bars).
+- Golden lines for the four styles, and a coarse fingerprint on every
+  line: `PROSPEKT_GOLDEN_TOLERANCE` lets the test pass on other Cairo and
+  Pixman versions when only edge anti-aliasing differs (CI uses 2).
+
+### Changed
+
+- `GeneratorStyle::MODERN` has eleven styles, so mixed variants cycle
+  through all of them; existing backgrounds render exactly as before.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

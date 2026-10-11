@@ -60,12 +60,21 @@ pub enum GeneratorStyle {
     /// Paper-cut topography: nested contour layers of a smooth height
     /// field. New in Prospekt 0.3.0.
     Contours,
+    /// Organic rounded shapes floating over each other. New in 0.4.0.
+    Blobs,
+    /// A soft mesh gradient of a few color points. New in 0.4.0.
+    Mesh,
+    /// Faceted triangles, shaded along a gradient. New in 0.4.0.
+    LowPoly,
+    /// Flat geometric shapes on a grid: quarter and half circles,
+    /// triangles, bars. New in 0.4.0.
+    Bauhaus,
 }
 
 impl GeneratorStyle {
     /// The styles offered for new backgrounds and mixed variants — every
     /// style except the legacy `Waves`.
-    pub const MODERN: [GeneratorStyle; 7] = [
+    pub const MODERN: [GeneratorStyle; 11] = [
         GeneratorStyle::Layers,
         GeneratorStyle::Arcs,
         GeneratorStyle::Ribbons,
@@ -73,6 +82,10 @@ impl GeneratorStyle {
         GeneratorStyle::Lines,
         GeneratorStyle::Mist,
         GeneratorStyle::Contours,
+        GeneratorStyle::Blobs,
+        GeneratorStyle::Mesh,
+        GeneratorStyle::LowPoly,
+        GeneratorStyle::Bauhaus,
     ];
 }
 

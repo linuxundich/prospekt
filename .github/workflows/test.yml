@@ -16,4 +16,8 @@ jobs:
       # Release mode: the golden test renders 153 backgrounds, and the
       # render-time checks are meant for optimized builds anyway.
       - name: Test, including the golden pixel test
+        # Ubuntu's Cairo and Pixman anti-alias a few edge pixels differently
+        # from the machine the references come from; see tests/golden.rs.
+        env:
+          PROSPEKT_GOLDEN_TOLERANCE: 2
         run: cargo test --release --all-targets

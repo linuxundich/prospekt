@@ -4,7 +4,7 @@
 
 <p align="center">
   A small Rust library that draws calm, abstract backgrounds with Cairo: layered paper,
-  concentric arcs, silk ribbons, folded planes, line bundles, soft mist, paper-cut contours and classic waves.
+  concentric arcs, silk ribbons, folded planes, line bundles, soft mist, paper-cut contours, organic blobs, mesh gradients, low-poly facets, Bauhaus geometry and classic waves.
   It is the generator behind Kulisse (a wallpaper app, not public yet)
   and <a href="https://github.com/linuxundich/ScreenForge">ScreenForge</a> (screenshot compositions).
 </p>
@@ -33,7 +33,7 @@ A `GeneratedBackground` holds only inputs: a seed, a style, a palette and a hand
 
 ```toml
 [dependencies]
-prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.3.0" }
+prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.4.0" }
 ```
 
 ```rust
@@ -51,7 +51,7 @@ prospekt::render(&Context::new(&surface)?, &bg, 3840.0, 2160.0, &[])?;
 
 Every background carries the algorithm `version` it was made with. A change that would alter how saved backgrounds look only applies from a new version on: saved scenes keep their pixels, and `GeneratedBackground::new` gives new backgrounds the latest version. Data saved before the field existed loads as version 1.
 
-A golden test pins the exact pixels of 153 backgrounds: 126 of version 1, rendered by ScreenForge 0.34.0, what version 2 changed, and the contours style. GitHub Actions runs it on every push. A failure means a saved look would change, so a new version is due instead.
+A golden test pins the exact pixels of 189 backgrounds: 126 of version 1, rendered by ScreenForge 0.34.0, what version 2 changed, and every style added since. GitHub Actions runs it on every push, there with a small tolerance for the edge anti-aliasing of older Cairo and Pixman versions. A failure means a saved look would change, so a new version is due instead.
 
 ```sh
 cargo test                                   # includes the golden test
