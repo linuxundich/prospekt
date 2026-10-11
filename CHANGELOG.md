@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-11
+
+### Fixed
+
+- Low-poly: no more single facets in the accent color; they looked out of
+  place. The facets use only the palette's ramp now. The style came out
+  the same day, so this changes it directly instead of adding an
+  algorithm version; its nine golden lines are renewed.
+
 ## [0.4.0] - 2026-10-11
 
 ### Added

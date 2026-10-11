@@ -33,7 +33,7 @@ A `GeneratedBackground` holds only inputs: a seed, a style, a palette and a hand
 
 ```toml
 [dependencies]
-prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.4.0" }
+prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.4.1" }
 ```
 
 ```rust

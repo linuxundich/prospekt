@@ -775,11 +775,11 @@ fn mesh(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Re
 }
 
 /// Faceted triangles over a loosely jittered grid, colored along a
-/// gradient through the palette, each facet a little lighter or darker,
-/// a few tinted with the accent. `density` sets the facet size,
+/// gradient through the palette, each facet a little lighter or darker.
+/// `density` sets the facet size,
 /// `variation` the jitter, `contrast` the facet shading.
 fn low_poly(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
-    let (ramp, accent) = ramp_and_accent(&bg.palette, 6);
+    let (ramp, _) = ramp_and_accent(&bg.palette, 6);
     let (w, h) = (geo.w, geo.h);
     let cols = count(bg.density, 7, 9);
     let cell = 1.3 * w.max(h) / cols as f64;
@@ -809,9 +809,6 @@ fn low_poly(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -
                 let mut color = ramp_at(&ramp, t);
                 let delta = rng.range(-shade, shade);
                 color = if delta >= 0.0 { lighten(color, delta) } else { darken(color, -delta) };
-                if rng.chance(0.03) {
-                    color = mix(color, accent, 0.6);
-                }
                 ctx.move_to(tri[0].0, tri[0].1);
                 ctx.line_to(tri[1].0, tri[1].1);
                 ctx.line_to(tri[2].0, tri[2].1);
