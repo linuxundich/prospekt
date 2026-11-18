@@ -6,7 +6,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 (Cairo 1.18.4) the mesh style renders visibly
+    # differently; see BACKLOG.md. 24.04 matches the references.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Cairo
