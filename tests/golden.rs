@@ -3,7 +3,8 @@
 //! from, so a failure here means saved ScreenForge scenes and Kulisse
 //! favorites would no longer look the same. Those lines use algorithm
 //! version 1; lines starting with `v2` pin what version 2 changed, and
-//! styles added later (contours, then blobs, mesh, low-poly and Bauhaus)
+//! styles added later (contours, then blobs, mesh, low-poly and Bauhaus,
+//! then quiet)
 //! follow at the end.
 //!
 //! Each line ends with an exact checksum and a coarse fingerprint (the mean
@@ -17,7 +18,7 @@
 
 use cairo::{Context, Format, ImageSurface};
 use prospekt::palette::resolve_palette_for;
-use prospekt::{GeneratedBackground, GeneratorStyle, Mood, Region};
+use prospekt::{ColorStrategy, GeneratedBackground, GeneratorStyle, Mood, Region, Rgba};
 
 const STYLES: [GeneratorStyle; 7] = [
     GeneratorStyle::Waves,
@@ -95,6 +96,18 @@ fn lines() -> Vec<String> {
                 out.push(format!("{style:?} {mood:?} {seed} {}", checksum(&bg, &regions)));
             }
         }
+    }
+    // Added in 0.5.0: the quiet style, with derived palettes and with
+    // three brand colors as they are (manual).
+    for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
+        for seed in [7u64, 42, 2026] {
+            let mut bg = GeneratedBackground { style: GeneratorStyle::Quiet, mood, grain: 0.4, ..GeneratedBackground::new(seed) };
+            bg.palette = resolve_palette_for(&[], bg.color_strategy, bg.inverse_contrast, seed, bg.style, mood);
+            out.push(format!("Quiet {mood:?} {seed} {}", checksum(&bg, &regions)));
+        }
+        let brand = vec![Rgba::new(0.114, 0.114, 0.106, 1.0), Rgba::new(0.949, 0.949, 0.949, 1.0), Rgba::new(0.89, 0.0, 0.086, 1.0)];
+        let bg = GeneratedBackground { style: GeneratorStyle::Quiet, mood, color_strategy: ColorStrategy::Manual, palette: brand, grain: 0.0, ..GeneratedBackground::new(5) };
+        out.push(format!("Quiet manual {mood:?} 5 {}", checksum(&bg, &regions)));
     }
     out
 }

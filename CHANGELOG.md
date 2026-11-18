@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-18
+
+### Added
+
+- `Quiet` style: plain and unobtrusive, for brand colors and calm
+  backdrops behind screenshots. A ground color with a barely visible
+  gradient, one large area a small step lighter or darker (a circle
+  reaching in from a corner, or a gentle sweep across the canvas) and one
+  to three fine lines along its edge. Unlike the other styles it takes the
+  palette's colors as they are: the most saturated color draws the lines,
+  `mood` picks the ground (lightest for `Light`, darkest for `Dark`, the
+  first color for `Vivid`), so the same two or three colors give a light
+  and a dark version. Twelve golden lines added at the end; all earlier
+  lines are unchanged.
+
 ## [0.4.1] - 2026-10-11
 
 ### Fixed

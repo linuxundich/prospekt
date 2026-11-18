@@ -27,7 +27,8 @@ use cairo::{Context, Format, ImageSurface, LinearGradient, RadialGradient};
 
 use crate::generator::Region;
 use crate::model::{GeneratedBackground, GeneratorStyle, Rgba};
-use crate::palette::ramp_and_accent;
+use crate::model::Mood;
+use crate::palette::{oklab_to_rgb, ramp_and_accent, rgb_to_oklab};
 use crate::error::RenderError;
 use crate::rng::Rng;
 
@@ -232,6 +233,7 @@ pub(crate) fn render(ctx: &Context, bg: &GeneratedBackground, width: f64, height
         GeneratorStyle::Mesh => mesh(ctx, bg, &geo, rng),
         GeneratorStyle::LowPoly => low_poly(ctx, bg, &geo, rng),
         GeneratorStyle::Bauhaus => bauhaus(ctx, bg, &geo, rng),
+        GeneratorStyle::Quiet => quiet(ctx, bg, &geo, rng),
         GeneratorStyle::Mist | GeneratorStyle::Waves => mist(ctx, bg, &geo, rng),
     }
 }
@@ -919,6 +921,135 @@ fn bauhaus(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) ->
     Ok(())
 }
 
+/// The colors of [`quiet`], taken from the palette as they are: no ramp is
+/// interpolated and no complementary accent invented, so two or three
+/// brand colors come out exactly. The most saturated color becomes the
+/// accent of the lines when it clearly stands out (chroma of at least
+/// 0.05 and not the only color). Of the rest, `mood` picks the ground:
+/// the lightest for `Light`, the darkest for `Dark`, and for `Vivid` the
+/// first one in palette order. The large area lies a small step from the
+/// ground toward the color farthest from it in lightness (`contrast`
+/// sets the step), or toward middle gray when there is only one.
+/// Returns `(ground, area, line)`.
+fn quiet_colors(palette: &[Rgba], mood: Mood, contrast: f64) -> (Rgba, Rgba, Rgba) {
+    let mut colors: Vec<(Rgba, (f64, f64, f64))> = palette.iter().map(|&c| (Rgba::new(c.r, c.g, c.b, 1.0), rgb_to_oklab(c))).collect();
+    if colors.is_empty() {
+        let gray = match mood {
+            Mood::Light => Rgba::new(0.95, 0.95, 0.95, 1.0),
+            _ => Rgba::new(0.12, 0.12, 0.12, 1.0),
+        };
+        colors.push((gray, rgb_to_oklab(gray)));
+    }
+    let chroma = |lab: &(f64, f64, f64)| lab.1.hypot(lab.2);
+    let accent_index = colors
+        .iter()
+        .enumerate()
+        .max_by(|a, b| chroma(&a.1 .1).total_cmp(&chroma(&b.1 .1)))
+        .filter(|(_, c)| colors.len() >= 2 && chroma(&c.1) >= 0.05)
+        .map(|(i, _)| i);
+    let accent = accent_index.map(|i| colors.remove(i));
+    let ground = match mood {
+        Mood::Light => *colors.iter().max_by(|a, b| a.1 .0.total_cmp(&b.1 .0)).unwrap(),
+        Mood::Dark => *colors.iter().min_by(|a, b| a.1 .0.total_cmp(&b.1 .0)).unwrap(),
+        Mood::Vivid => colors[0],
+    };
+    let step = 0.05 + 0.1 * contrast.clamp(0.0, 1.0);
+    let (gl, ga, gb) = ground.1;
+    let toward = colors.iter().max_by(|a, b| (a.1 .0 - gl).abs().total_cmp(&(b.1 .0 - gl).abs())).filter(|c| (c.1 .0 - gl).abs() > 0.02).map(|c| c.1);
+    let (tl, ta, tb) = toward.unwrap_or((if gl > 0.5 { gl - 0.4 } else { gl + 0.4 }, ga, gb));
+    let area = oklab_to_rgb(gl + (tl - gl) * step, ga + (ta - ga) * step, gb + (tb - gb) * step);
+    let line = match accent {
+        Some((c, _)) => c,
+        None => {
+            let t = 2.5 * step;
+            oklab_to_rgb(gl + (tl - gl) * t, ga + (ta - ga) * t, gb + (tb - gb) * t)
+        }
+    };
+    (ground.0, area, line)
+}
+
+/// Traces the edge of [`quiet`]'s area pushed outward by a distance;
+/// with `true`, closed into the area itself.
+type QuietEdge<'a> = Box<dyn Fn(&Context, f64, bool) + 'a>;
+
+/// Plain and unobtrusive, for brand colors and calm backdrops: the ground
+/// color with a barely visible gradient, one large area a small step
+/// lighter or darker (a circle reaching in from a corner, or a gentle
+/// sweep across the canvas, picked by the seed) and one to three fine
+/// lines along its edge in the accent color. `density` sets the number of
+/// lines, `variation` how far the area reaches and how much the sweep
+/// bends, `contrast` the tone step, `softness` the faint shadow.
+fn quiet(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
+    let (ground, area, line) = quiet_colors(&bg.palette, bg.mood, bg.contrast);
+    let (w, h, u) = (geo.w, geo.h, geo.u);
+    let variation = bg.variation.clamp(0.0, 1.0);
+    let toward_area = mix(ground, area, 0.35);
+    base_gradient(ctx, geo, ground, toward_area, rng.range(0.4, 1.2))?;
+
+    let lines = count(bg.density, 1, 2);
+    let gap = u * 0.022;
+    let corner = rng.index(4);
+    let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][corner];
+    // Each entry draws the area's edge pushed `grow` outward; 0 is the area.
+    let shape: QuietEdge<'_> = if rng.chance(0.5) {
+        let (cx, cy) = (w / 2.0 + sx * w * rng.range(0.42, 0.62), h / 2.0 + sy * h * rng.range(0.42, 0.62));
+        let r = geo.diag() * (0.34 + 0.22 * variation) * rng.range(0.9, 1.1);
+        let center = geo.p((cx, cy));
+        let scale = geo.scale;
+        Box::new(move |c: &Context, grow: f64, _closed: bool| {
+            c.new_sub_path();
+            c.arc(center.0, center.1, (r + grow) * scale, 0.0, PI * 2.0);
+        })
+    } else {
+        let n = 7;
+        let reach = 0.5 + 0.25 * variation;
+        let bend = (0.04 + 0.12 * variation) * h;
+        let phase = rng.range(0.0, PI * 2.0);
+        let base_y = if sy < 0.0 { h * (1.0 - reach) } else { h * reach };
+        let pts: Vec<(f64, f64)> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                let x = -0.1 * w + t * 1.2 * w;
+                let y = base_y + (t - 0.5) * sx * h * 0.25 + bend * (t * PI * 1.3 + phase).sin();
+                (x, y)
+            })
+            .collect();
+        let down = sy > 0.0;
+        let edge = move |grow: f64| -> Vec<(f64, f64)> { pts.iter().map(|&(x, y)| (x, if down { y - grow } else { y + grow })).collect() };
+        let far_y = if down { h * 2.0 } else { -h };
+        let to = |p: (f64, f64)| geo.p(p);
+        let (wl, wr) = (-0.1 * w, 1.1 * w);
+        Box::new(move |c: &Context, grow: f64, closed: bool| {
+            let p: Vec<(f64, f64)> = edge(grow).into_iter().map(to).collect();
+            smooth(c, &p, true);
+            if closed {
+                let (a, b) = (to((wr, far_y)), to((wl, far_y)));
+                c.line_to(a.0, a.1);
+                c.line_to(b.0, b.1);
+                c.close_path();
+            }
+        })
+    };
+
+    let (blur, alpha) = shadow_params(bg, geo);
+    let build = |c: &Context| shape(c, 0.0, true);
+    cast_shadow(ctx, geo, &build, geo.v((0.0, u * 0.004)), blur * 0.8, alpha * 0.3)?;
+    ctx.new_path();
+    shape(ctx, 0.0, true);
+    ctx.set_source_rgb(area.r, area.g, area.b);
+    ctx.fill()?;
+
+    ctx.set_line_cap(cairo::LineCap::Round);
+    for i in 0..lines {
+        ctx.new_path();
+        shape(ctx, gap * (i + 1) as f64, false);
+        ctx.set_source_rgba(line.r, line.g, line.b, 1.0 - 0.3 * i as f64);
+        ctx.set_line_width(u * (0.0045 - 0.001 * i as f64) * geo.scale);
+        ctx.stroke()?;
+    }
+    Ok(())
+}
+
 /// A closed smooth curve through `points` (Catmull-Rom, wrapping around).
 fn smooth_closed(ctx: &Context, points: &[(f64, f64)]) {
     let n = points.len();
@@ -1170,6 +1301,31 @@ mod tests {
             let bg = GeneratedBackground { palette: Vec::new(), ..background(style, 1) };
             render_checksum(&bg, 64, 64);
         }
+    }
+
+    #[test]
+    fn quiet_uses_the_palette_colors_as_they_are() {
+        let (dark, light, red) = (Rgba::new(0.11, 0.11, 0.1, 1.0), Rgba::new(0.95, 0.95, 0.95, 1.0), Rgba::new(0.89, 0.0, 0.09, 1.0));
+        let palette = [dark, light, red];
+        let (ground, area, line) = quiet_colors(&palette, Mood::Dark, 0.4);
+        assert_eq!((ground, line), (dark, red));
+        assert!(area.r > ground.r && area.r < 0.3, "area {area:?} should be a small step lighter");
+        let (ground, area, line) = quiet_colors(&palette, Mood::Light, 0.4);
+        assert_eq!((ground, line), (light, red));
+        assert!(area.r < ground.r && area.r > 0.75, "area {area:?} should be a small step darker");
+        // Vivid keeps the palette order for the ground.
+        assert_eq!(quiet_colors(&[light, red, dark], Mood::Vivid, 0.4).0, light);
+    }
+
+    #[test]
+    fn quiet_without_a_saturated_color_draws_neutral_lines() {
+        let gray = [Rgba::new(0.1, 0.1, 0.1, 1.0), Rgba::new(0.9, 0.9, 0.9, 1.0)];
+        let (ground, area, line) = quiet_colors(&gray, Mood::Dark, 0.5);
+        assert_eq!(ground, gray[0]);
+        assert!(ground.r < area.r && area.r < line.r && line.r < gray[1].r);
+        // A single saturated color is the ground, not an accent.
+        let blue = Rgba::new(0.2, 0.4, 0.64, 1.0);
+        assert_eq!(quiet_colors(&[blue], Mood::Light, 0.5).0, blue);
     }
 
     #[test]

@@ -69,12 +69,16 @@ pub enum GeneratorStyle {
     /// Flat geometric shapes on a grid: quarter and half circles,
     /// triangles, bars. New in 0.4.0.
     Bauhaus,
+    /// Plain and unobtrusive: a ground color, one large area in a slightly
+    /// different tone and a few fine lines. Uses the palette's colors as
+    /// they are, so two or three brand colors are enough. New in 0.5.0.
+    Quiet,
 }
 
 impl GeneratorStyle {
     /// The styles offered for new backgrounds and mixed variants — every
     /// style except the legacy `Waves`.
-    pub const MODERN: [GeneratorStyle; 11] = [
+    pub const MODERN: [GeneratorStyle; 12] = [
         GeneratorStyle::Layers,
         GeneratorStyle::Arcs,
         GeneratorStyle::Ribbons,
@@ -86,6 +90,7 @@ impl GeneratorStyle {
         GeneratorStyle::Mesh,
         GeneratorStyle::LowPoly,
         GeneratorStyle::Bauhaus,
+        GeneratorStyle::Quiet,
     ];
 }
 

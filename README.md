@@ -4,7 +4,7 @@
 
 <p align="center">
   A small Rust library that draws calm, abstract backgrounds with Cairo: layered paper,
-  concentric arcs, silk ribbons, folded planes, line bundles, soft mist, paper-cut contours, organic blobs, mesh gradients, low-poly facets, Bauhaus geometry and classic waves.
+  concentric arcs, silk ribbons, folded planes, line bundles, soft mist, paper-cut contours, organic blobs, mesh gradients, low-poly facets, Bauhaus geometry, a quiet style for brand colors and classic waves.
   It is the generator behind Kulisse (a wallpaper app, not public yet)
   and <a href="https://github.com/linuxundich/ScreenForge">ScreenForge</a> (screenshot compositions).
 </p>
