@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI runs on Ubuntu 24.04 instead of `ubuntu-latest`. On Ubuntu 26.04
+  (Cairo 1.18.4) the mesh style renders visibly differently from the
+  references, while Arch and Ubuntu 24.04 match; the cause is noted in the
+  backlog.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added
