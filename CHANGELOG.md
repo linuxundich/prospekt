@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-19
+
+### Added
+
+- Strong colors: `GeneratedBackground::vibrance` (`0.0..=1.0`, default
+  `0.0`) and `palette::vibrant_mood_palette`/`resolve_palette_vibrant`.
+  `0.0` gives exactly the soft, slightly pastel palettes as before; `1.0`
+  narrows each mood's lightness range toward the middle and raises every
+  step's chroma to what sRGB holds at its lightness and hue
+  (`palette::max_chroma`), so colors are deep and saturated without
+  clipping hues. Same seed, same hues, only stronger. Above zero the
+  classic waves get a mood ramp too.
+- Algorithm version 3 (`LATEST_VERSION`): the accent of the modern styles
+  may be as saturated as sRGB allows instead of stopping at chroma 0.16,
+  and with such a strong accent the arcs' second set of rings takes its
+  hue instead of an RGB mix that turned gray. Soft palettes look exactly
+  as in version 2. `palette::ramp_and_accent_versioned` exposes it;
+  `ramp_and_accent` keeps version 2.
+- Example `vibrance_sheet`: a contact sheet of soft, half and full
+  strength.
+- 30 golden lines for strong colors at the end; all earlier lines are
+  unchanged.
+
 ### Changed
 
 - CI runs on Ubuntu 24.04 instead of `ubuntu-latest`. On Ubuntu 26.04

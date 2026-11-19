@@ -28,7 +28,7 @@ use cairo::{Context, Format, ImageSurface, LinearGradient, RadialGradient};
 use crate::generator::Region;
 use crate::model::{GeneratedBackground, GeneratorStyle, Rgba};
 use crate::model::Mood;
-use crate::palette::{oklab_to_rgb, ramp_and_accent, rgb_to_oklab};
+use crate::palette::{oklab_to_rgb, ramp_and_accent_versioned, rgb_to_oklab};
 use crate::error::RenderError;
 use crate::rng::Rng;
 
@@ -243,7 +243,7 @@ pub(crate) fn render(ctx: &Context, bg: &GeneratedBackground, width: f64, height
 /// onto the layer behind it.
 fn layers(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let k = count(bg.density, 4, 4);
-    let (ramp, _) = ramp_and_accent(&bg.palette, k + 1);
+    let (ramp, _) = ramp_and_accent_versioned(&bg.palette, k + 1, bg.version);
     let (w, h) = (geo.w, geo.h);
     base_gradient(ctx, geo, lighten(ramp[k], 0.2), ramp[k], PI / 2.0)?;
 
@@ -289,7 +289,7 @@ fn layers(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> 
 /// (`0.0`, flatter arcs) right into the corner (`1.0`).
 fn arcs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng, regions: &[Region]) -> Result<(), RenderError> {
     let rings = count(bg.density, 5, 4);
-    let (ramp, accent) = ramp_and_accent(&bg.palette, rings);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, rings, bg.version);
     base_gradient(ctx, geo, ramp[0], darken(ramp[0], 0.25), 0.8)?;
 
     let (w, h) = (geo.w, geo.h);
@@ -319,7 +319,16 @@ fn arcs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng, regio
             let r = r_max * (1.0 - t * spread);
             let mut color = ramp[((1.0 - t) * (rings - 1) as f64).round() as usize];
             if secondary {
-                color = mix(color, accent, 0.55);
+                // Mixing in RGB grays a color and its complement, which
+                // suits soft palettes but dulls strong ones; from version 3
+                // on a strong accent (chroma above version 2's cap of 0.16)
+                // gives the second set its hue at the rings' lightness.
+                let (accent_l, a, b) = rgb_to_oklab(accent);
+                color = if bg.version >= 3 && a.hypot(b) > 0.165 {
+                    oklab_to_rgb(rgb_to_oklab(color).0 * 0.45 + accent_l * 0.55, a, b)
+                } else {
+                    mix(color, accent, 0.55)
+                };
             }
             let build = |c: &Context| {
                 c.new_path();
@@ -342,7 +351,7 @@ fn arcs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng, regio
 /// with alternating light/dark stops along its length for the folds.
 fn ribbons(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let n = 6;
-    let (ramp, accent) = ramp_and_accent(&bg.palette, n);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, n, bg.version);
     let (w, h, u) = (geo.w, geo.h, geo.u);
     base_gradient(ctx, geo, lighten(ramp[n - 1], 0.1), ramp[n - 2], rng.range(0.0, PI))?;
 
@@ -392,7 +401,7 @@ fn ribbons(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) ->
 /// soft shadow along each fold and a thin highlight on the edge itself.
 fn planes(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let k = count(bg.density, 4, 3);
-    let (ramp, _) = ramp_and_accent(&bg.palette, k + 1);
+    let (ramp, _) = ramp_and_accent_versioned(&bg.palette, k + 1, bg.version);
     let (w, h, u) = (geo.w, geo.h, geo.u);
     let diag = geo.diag();
     base_gradient(ctx, geo, ramp[k], lighten(ramp[k - 1], 0.2), 1.2)?;
@@ -442,7 +451,7 @@ fn planes(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> 
 /// over a gradient with a soft glow in the accent color.
 fn lines(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let n = 6;
-    let (ramp, accent) = ramp_and_accent(&bg.palette, n);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, n, bg.version);
     let (w, h, u) = (geo.w, geo.h, geo.u);
     base_gradient(ctx, geo, ramp[0], ramp[n / 2], rng.range(0.0, PI * 2.0))?;
 
@@ -482,7 +491,7 @@ fn lines(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> R
 /// `softness` widens the fields, `variation` scatters them further.
 fn mist(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let n = 6;
-    let (ramp, accent) = ramp_and_accent(&bg.palette, n);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, n, bg.version);
     let (w, h) = (geo.w, geo.h);
     let base = ramp[n / 2];
     ctx.set_source_rgb(base.r, base.g, base.b);
@@ -515,7 +524,7 @@ fn mist(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Re
 /// `density` sets the number of levels, `variation` the number of hills.
 fn contours(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let levels = count(bg.density, 6, 6);
-    let (ramp, _) = ramp_and_accent(&bg.palette, levels + 1);
+    let (ramp, _) = ramp_and_accent_versioned(&bg.palette, levels + 1, bg.version);
     base_gradient(ctx, geo, ramp[0], darken(ramp[0], 0.2), PI / 2.0)?;
 
     let (w, h) = (geo.w, geo.h);
@@ -622,7 +631,7 @@ fn ramp_at(ramp: &[Rgba], t: f64) -> Rgba {
 /// `density` sets how many, `variation` how far they stray from circles.
 fn blobs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
     let n = count(bg.density, 4, 5);
-    let (ramp, accent) = ramp_and_accent(&bg.palette, n + 1);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, n + 1, bg.version);
     base_gradient(ctx, geo, lighten(ramp[n], 0.12), ramp[n], PI * 0.3)?;
     let (w, h) = (geo.w, geo.h);
     let variation = bg.variation.clamp(0.0, 1.0);
@@ -668,7 +677,7 @@ fn blobs(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> R
 /// the number of color points, `variation` how far the grid bends,
 /// `contrast` how often the accent color appears.
 fn mesh(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
-    let (ramp, accent) = ramp_and_accent(&bg.palette, 5);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, 5, bg.version);
     let (w, h) = (geo.w, geo.h);
     ctx.set_source_rgb(ramp[2].r, ramp[2].g, ramp[2].b);
     ctx.paint()?;
@@ -781,7 +790,7 @@ fn mesh(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Re
 /// `density` sets the facet size,
 /// `variation` the jitter, `contrast` the facet shading.
 fn low_poly(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
-    let (ramp, _) = ramp_and_accent(&bg.palette, 6);
+    let (ramp, _) = ramp_and_accent_versioned(&bg.palette, 6, bg.version);
     let (w, h) = (geo.w, geo.h);
     let cols = count(bg.density, 7, 9);
     let cell = 1.3 * w.max(h) / cols as f64;
@@ -832,7 +841,7 @@ fn low_poly(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -
 /// with a light shadow. `density` sets the grid size, `variation` how
 /// busy the cells are.
 fn bauhaus(ctx: &Context, bg: &GeneratedBackground, geo: &Geo, rng: &mut Rng) -> Result<(), RenderError> {
-    let (ramp, accent) = ramp_and_accent(&bg.palette, 5);
+    let (ramp, accent) = ramp_and_accent_versioned(&bg.palette, 5, bg.version);
     let ground = lighten(ramp[4], 0.06);
     ctx.set_source_rgb(ground.r, ground.g, ground.b);
     ctx.paint()?;

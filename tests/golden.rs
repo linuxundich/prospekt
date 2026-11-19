@@ -4,7 +4,7 @@
 //! favorites would no longer look the same. Those lines use algorithm
 //! version 1; lines starting with `v2` pin what version 2 changed, and
 //! styles added later (contours, then blobs, mesh, low-poly and Bauhaus,
-//! then quiet)
+//! then quiet, then strong colors)
 //! follow at the end.
 //!
 //! Each line ends with an exact checksum and a coarse fingerprint (the mean
@@ -108,6 +108,16 @@ fn lines() -> Vec<String> {
         let brand = vec![Rgba::new(0.114, 0.114, 0.106, 1.0), Rgba::new(0.949, 0.949, 0.949, 1.0), Rgba::new(0.89, 0.0, 0.086, 1.0)];
         let bg = GeneratedBackground { style: GeneratorStyle::Quiet, mood, color_strategy: ColorStrategy::Manual, palette: brand, grain: 0.0, ..GeneratedBackground::new(5) };
         out.push(format!("Quiet manual {mood:?} 5 {}", checksum(&bg, &regions)));
+    }
+    // Added in 0.6.0: strong colors (vibrance 1) with version 3's accent.
+    for style in [GeneratorStyle::Waves, GeneratorStyle::Arcs, GeneratorStyle::Ribbons, GeneratorStyle::Blobs, GeneratorStyle::Bauhaus] {
+        for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
+            for seed in [42u64, 2026] {
+                let mut bg = GeneratedBackground { style, mood, grain: 0.4, vibrance: 1.0, version: 3, ..GeneratedBackground::new(seed) };
+                bg.palette = prospekt::palette::resolve_palette_vibrant(&[], bg.color_strategy, bg.inverse_contrast, seed, style, mood, 1.0);
+                out.push(format!("Vibrant {style:?} {mood:?} {seed} {}", checksum(&bg, &regions)));
+            }
+        }
     }
     out
 }

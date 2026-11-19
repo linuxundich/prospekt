@@ -189,8 +189,21 @@ pub struct GeneratedBackground {
     /// - 1: as in ScreenForge 0.34.0.
     /// - 2: the classic waves are smooth curves instead of a 24-point
     ///   polygon.
+    /// - 3: the accent color of the modern styles may be as saturated as
+    ///   sRGB allows instead of stopping at an Oklch chroma of 0.16; only
+    ///   strongly saturated palettes see a difference. With such an accent
+    ///   the arcs' second, smaller set of rings takes its hue instead of an
+    ///   RGB mix with it, which turned gray.
     #[serde(default = "first_version")]
     pub version: u32,
+    /// `0.0..=1.0` color strength of derived palettes: `0.0` soft (and
+    /// slightly pastel), as before the field existed; `1.0` strong,
+    /// deeply saturated colors. Like `mood`, it only affects how a palette
+    /// is resolved ([`crate::palette::resolve_palette_vibrant`],
+    /// [`crate::palette::vibrant_mood_palette`]); rendering reads just
+    /// `palette`. New in 0.6.0.
+    #[serde(default)]
+    pub vibrance: f64,
 }
 
 fn default_generated_scale() -> f64 {
@@ -203,7 +216,7 @@ fn first_version() -> u32 {
 
 impl GeneratedBackground {
     /// The newest algorithm version; see [`GeneratedBackground::version`].
-    pub const LATEST_VERSION: u32 = 2;
+    pub const LATEST_VERSION: u32 = 3;
 
     /// A fresh background with reasonable defaults — restrained enough
     /// that the very first "Generate" click already looks intentional,
@@ -233,6 +246,7 @@ impl GeneratedBackground {
             mood: Mood::Vivid,
             grain: 0.35,
             version: GeneratedBackground::LATEST_VERSION,
+            vibrance: 0.0,
         }
     }
 }

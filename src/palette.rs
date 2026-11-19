@@ -243,19 +243,36 @@ pub fn resolve_palette_for(
     style: GeneratorStyle,
     mood: Mood,
 ) -> Vec<Rgba> {
-    if style == GeneratorStyle::Waves {
+    resolve_palette_vibrant(images, strategy, inverse_contrast, seed, style, mood, 0.0)
+}
+
+/// [`resolve_palette_for`] with a color strength (see
+/// [`vibrant_mood_palette`]); `vibrance` `0.0` gives exactly the same
+/// palettes, and grayscale ignores it. Above zero the classic waves get a mood ramp too, since their
+/// original palettes have no strength to raise.
+pub fn resolve_palette_vibrant(
+    images: &[PixelSample],
+    strategy: ColorStrategy,
+    inverse_contrast: f64,
+    seed: u64,
+    style: GeneratorStyle,
+    mood: Mood,
+    vibrance: f64,
+) -> Vec<Rgba> {
+    if style == GeneratorStyle::Waves && vibrance <= 0.0 {
         return resolve_palette(images, strategy, inverse_contrast, seed);
     }
     match strategy {
         ColorStrategy::Manual => Vec::new(),
-        ColorStrategy::Random => mood_palette(seed, mood, None, 1.0),
+        ColorStrategy::Random => vibrant_mood_palette(seed, mood, None, 1.0, vibrance),
+        // Grays have no color to strengthen.
         ColorStrategy::Grayscale => mood_palette(seed, mood, Some(0.0), 0.0),
         ColorStrategy::FromScreenshots => {
             let dominant = extract_palette(images, 3);
             let base = dominant.first().copied().unwrap_or_else(|| average_color(images));
             let (_, a, b) = rgb_to_oklab(base);
             let hue = b.atan2(a) + PI * inverse_contrast.clamp(0.0, 1.0);
-            mood_palette(seed, mood, Some(hue), 1.0)
+            vibrant_mood_palette(seed, mood, Some(hue), 1.0, vibrance)
         }
     }
 }
@@ -276,29 +293,100 @@ pub fn chance_hue(seed: u64) -> f64 {
 }
 
 pub fn mood_palette(seed: u64, mood: Mood, hue: Option<f64>, chroma_gain: f64) -> Vec<Rgba> {
+    vibrant_mood_palette(seed, mood, hue, chroma_gain, 0.0)
+}
+
+/// [`mood_palette`] with a color strength: `vibrance` `0.0` is exactly
+/// [`mood_palette`], soft and slightly pastel; `1.0` gives strong, deeply
+/// saturated colors. With growing `vibrance` the lightness range narrows
+/// toward the middle, where sRGB holds the most chroma, and every step's
+/// chroma rises toward the most its lightness and hue allow in sRGB
+/// ([`max_chroma`]). Colors are kept inside the gamut instead of clipped
+/// per channel, so hues stay true. The hue and drift are the same as
+/// [`mood_palette`]'s for the same seed, so a background keeps its colors
+/// and only gains strength.
+pub fn vibrant_mood_palette(seed: u64, mood: Mood, hue: Option<f64>, chroma_gain: f64, vibrance: f64) -> Vec<Rgba> {
     let mut rng = crate::rng::Rng::new(seed ^ 0x6D6F_6F64_7061_6C65);
     let mut hue = hue.unwrap_or_else(|| rng.range(0.0, PI * 2.0)).rem_euclid(PI * 2.0);
     let drift = rng.range(-45.0, 45.0).to_radians();
-    let (mut l0, l1, c_max) = match mood {
+    let (mut l0, mut l1, c_max) = match mood {
         Mood::Vivid => (0.32, 0.92, 0.13),
         Mood::Light => (0.66, 0.97, 0.075),
         Mood::Dark => (0.17, 0.56, 0.11),
     };
     let yellow = (70f64.to_radians())..(135f64.to_radians());
-    if yellow.contains(&hue) && chroma_gain > 0.0 {
+    let in_yellow = yellow.contains(&hue) && chroma_gain > 0.0;
+    if in_yellow {
         match mood {
             Mood::Dark => hue = if hue < 100f64.to_radians() { 55f64.to_radians() } else { 150f64.to_radians() },
             Mood::Vivid => l0 = 0.48,
             Mood::Light => {}
         }
     }
+    let v = vibrance.clamp(0.0, 1.0);
+    if v <= 0.0 {
+        return (0..5)
+            .map(|i| {
+                let t = i as f64 / 4.0;
+                let chroma = c_max * chroma_gain * (0.55 + 0.45 * (PI * t).sin());
+                rgba_from_oklch(l0 + (l1 - l0) * t, chroma, hue + drift * t)
+            })
+            .collect();
+    }
+    // The lightness range strong colors live in: saturated yellows are
+    // light, so their ramp starts higher.
+    let (b0, b1) = match mood {
+        Mood::Vivid => (if in_yellow { 0.62 } else { 0.42 }, 0.84),
+        Mood::Light => (if in_yellow { 0.78 } else { 0.62 }, 0.9),
+        Mood::Dark => (0.27, 0.6),
+    };
+    l0 += (b0 - l0) * v;
+    l1 += (b1 - l1) * v;
     (0..5)
         .map(|i| {
             let t = i as f64 / 4.0;
-            let chroma = c_max * chroma_gain * (0.55 + 0.45 * (PI * t).sin());
-            rgba_from_oklch(l0 + (l1 - l0) * t, chroma, hue + drift * t)
+            let (l, h) = (l0 + (l1 - l0) * t, hue + drift * t);
+            let soft = c_max * (0.55 + 0.45 * (PI * t).sin());
+            let strong = max_chroma(l, h) * (0.88 + 0.12 * (PI * t).sin());
+            let chroma = ((soft + (strong - soft) * v) * chroma_gain).min(max_chroma(l, h));
+            rgba_from_oklch(l, chroma, h)
         })
         .collect()
+}
+
+/// Oklab -> linear sRGB, unclamped.
+fn oklab_to_linear(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let l_ = l + 0.396_337_777_4 * a + 0.215_803_757_3 * b;
+    let m_ = l - 0.105_561_345_8 * a - 0.063_854_172_8 * b;
+    let s_ = l - 0.089_484_177_5 * a - 1.291_485_548_0 * b;
+    let (l3, m3, s3) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+    (
+        4.076_741_662_1 * l3 - 3.307_711_591_3 * m3 + 0.230_969_929_2 * s3,
+        -1.268_438_004_6 * l3 + 2.609_757_401_1 * m3 - 0.341_319_396_5 * s3,
+        -0.004_196_086_3 * l3 - 0.703_418_614_7 * m3 + 1.707_614_701_0 * s3,
+    )
+}
+
+/// The highest Oklch chroma that still fits in sRGB at `lightness` and
+/// `hue` (radians), found by bisection.
+pub fn max_chroma(lightness: f64, hue: f64) -> f64 {
+    let fits = |c: f64| {
+        let (r, g, b) = oklab_to_linear(lightness, c * hue.cos(), c * hue.sin());
+        [r, g, b].iter().all(|v| (-1e-4..=1.0 + 1e-4).contains(v))
+    };
+    if !(0.0..=1.0).contains(&lightness) || !fits(0.0) {
+        return 0.0;
+    }
+    let (mut lo, mut hi) = (0.0, 0.4);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
 }
 
 /// What the modern styles draw with: `palette` sorted by lightness and
@@ -306,7 +394,18 @@ pub fn mood_palette(seed: u64, mood: Mood, hue: Option<f64>, chroma_gain: f64) -
 /// accent opposite the palette's mean hue. Works for any input — a
 /// resolved ramp, four hand-picked manual colors, or a classic palette —
 /// and falls back to a neutral gray ramp when `palette` is empty.
+///
+/// Uses the accent of algorithm version 2; see [`ramp_and_accent_versioned`].
 pub fn ramp_and_accent(palette: &[Rgba], steps: usize) -> (Vec<Rgba>, Rgba) {
+    ramp_and_accent_versioned(palette, steps, 2)
+}
+
+/// [`ramp_and_accent`] for a background's algorithm `version`. Up to
+/// version 2 the accent's chroma stops at 0.16, which reads dull next to a
+/// strongly saturated palette; from version 3 on it may rise to what sRGB
+/// holds at its lightness and hue. Palettes up to a chroma of about 0.14,
+/// which includes every soft mood palette, get the same accent in both.
+pub fn ramp_and_accent_versioned(palette: &[Rgba], steps: usize, version: u32) -> (Vec<Rgba>, Rgba) {
     let mut labs: Vec<(f64, f64, f64)> = palette.iter().map(|&c| rgb_to_oklab(c)).collect();
     if labs.is_empty() {
         labs = vec![(0.45, 0.0, 0.0), (0.92, 0.0, 0.0)];
@@ -336,7 +435,9 @@ pub fn ramp_and_accent(palette: &[Rgba], steps: usize) -> (Vec<Rgba>, Rgba) {
         oklab_to_rgb((mean_l + 0.15).min(0.9), 0.0, 0.0)
     } else {
         let hue = b_mean.atan2(a_mean) + PI;
-        rgba_from_oklch((mean_l + 0.08).clamp(0.45, 0.8), (chroma * 1.15).min(0.16), hue)
+        let lightness = (mean_l + 0.08).clamp(0.45, 0.8);
+        let cap = if version >= 3 { 0.16f64.max(max_chroma(lightness, hue) * 0.95) } else { 0.16 };
+        rgba_from_oklch(lightness, (chroma * 1.15).min(cap), hue)
     };
     (ramp, accent)
 }
@@ -576,6 +677,66 @@ mod tests {
         for strategy in [ColorStrategy::FromScreenshots, ColorStrategy::Grayscale] {
             let palette = resolve_palette(&[], strategy, 0.5, 1);
             assert!(!palette.is_empty());
+        }
+    }
+
+    fn chroma_of(c: Rgba) -> f64 {
+        let (_, a, b) = rgb_to_oklab(c);
+        a.hypot(b)
+    }
+
+    #[test]
+    fn zero_vibrance_is_exactly_the_mood_palette() {
+        for seed in 0..40u64 {
+            for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
+                assert_eq!(vibrant_mood_palette(seed, mood, None, 1.0, 0.0), mood_palette(seed, mood, None, 1.0));
+            }
+        }
+    }
+
+    #[test]
+    fn full_vibrance_is_clearly_more_saturated_and_keeps_the_hue() {
+        let mean = |p: &[Rgba]| p.iter().map(|&c| chroma_of(c)).sum::<f64>() / p.len() as f64;
+        for mood in [Mood::Vivid, Mood::Light, Mood::Dark] {
+            let (mut soft_sum, mut bold_sum) = (0.0, 0.0);
+            for seed in 0..40u64 {
+                let soft = mood_palette(seed, mood, None, 1.0);
+                let bold = vibrant_mood_palette(seed, mood, None, 1.0, 1.0);
+                // Dark yellow-greens have little room in sRGB, so each
+                // palette only has to gain; on average the gain is large.
+                assert!(mean(&bold) >= mean(&soft), "seed {seed} {mood:?}: {} vs {}", mean(&bold), mean(&soft));
+                soft_sum += mean(&soft);
+                bold_sum += mean(&bold);
+                let hue = |c: Rgba| {
+                    let (_, a, b) = rgb_to_oklab(c);
+                    b.atan2(a)
+                };
+                let d = (hue(bold[2]) - hue(soft[2])).rem_euclid(PI * 2.0);
+                assert!(d.min(PI * 2.0 - d) < 0.5, "seed {seed} {mood:?}: hue moved by {d}");
+            }
+            assert!(bold_sum > soft_sum * 1.5, "{mood:?}: {bold_sum} vs {soft_sum}");
+        }
+    }
+
+    #[test]
+    fn grayscale_stays_gray_at_full_vibrance() {
+        for color in vibrant_mood_palette(3, Mood::Vivid, Some(0.0), 0.0, 1.0) {
+            assert!(chroma_of(color) < 0.002, "{color:?}");
+        }
+    }
+
+    #[test]
+    fn max_chroma_fits_srgb_and_is_tight() {
+        for l in [0.3, 0.5, 0.7, 0.9] {
+            for h in 0..12 {
+                let h = h as f64 * PI / 6.0;
+                let c = max_chroma(l, h);
+                assert!(c > 0.02, "l {l} h {h}: {c}");
+                let (r, g, b) = oklab_to_linear(l, c * h.cos(), c * h.sin());
+                assert!([r, g, b].iter().all(|v| (-1e-3..=1.001).contains(v)));
+                let (r, g, b) = oklab_to_linear(l, (c + 0.01) * h.cos(), (c + 0.01) * h.sin());
+                assert!(![r, g, b].iter().all(|v| (0.0..=1.0).contains(v)));
+            }
         }
     }
 }

@@ -24,6 +24,7 @@ A *Prospekt* is the painted backdrop at the back of a theatre stage.
 A `GeneratedBackground` holds only inputs: a seed, a style, a palette and a handful of `0.0..=1.0` knobs (density, flow, variation, contrast, softness, grain, zoom, offset). `render` turns them into vector drawing on any Cairo context. The same inputs always give the same picture, at any size from a thumbnail to 8K, so storing those few hundred bytes is enough to get a background back exactly.
 
 - Palettes are built in Oklab: mood ramps (vivid, light, dark) around a random or chosen hue, grayscale, or colors taken from images.
+- A color strength (`vibrance`) slides each mood from soft, slightly pastel tones to strong, deeply saturated ones, kept inside sRGB so hues stay true.
 - Soft shadows from one light direction and gentle gradients give depth.
 - `variant` derives any number of alternatives from one background.
 - Regions can be kept clear, so a composition's content doesn't sit on the busiest part.
@@ -33,7 +34,7 @@ A `GeneratedBackground` holds only inputs: a seed, a style, a palette and a hand
 
 ```toml
 [dependencies]
-prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.4.1" }
+prospekt = { git = "https://github.com/linuxundich/prospekt", tag = "v0.6.0" }
 ```
 
 ```rust
@@ -42,6 +43,7 @@ use prospekt::{palette, GeneratedBackground, GeneratorStyle, Mood};
 
 let mut bg = GeneratedBackground { style: GeneratorStyle::Arcs, mood: Mood::Dark, ..GeneratedBackground::new(42) };
 bg.palette = palette::mood_palette(bg.seed, bg.mood, None, 1.0);
+// or strong colors: palette::vibrant_mood_palette(bg.seed, bg.mood, None, 1.0, 1.0)
 
 let surface = ImageSurface::create(Format::ARgb32, 3840, 2160)?;
 prospekt::render(&Context::new(&surface)?, &bg, 3840.0, 2160.0, &[])?;
@@ -51,13 +53,14 @@ prospekt::render(&Context::new(&surface)?, &bg, 3840.0, 2160.0, &[])?;
 
 Every background carries the algorithm `version` it was made with. A change that would alter how saved backgrounds look only applies from a new version on: saved scenes keep their pixels, and `GeneratedBackground::new` gives new backgrounds the latest version. Data saved before the field existed loads as version 1.
 
-A golden test pins the exact pixels of 189 backgrounds: 126 of version 1, rendered by ScreenForge 0.34.0, what version 2 changed, and every style added since. GitHub Actions runs it on every push, there with a small tolerance for the edge anti-aliasing of older Cairo and Pixman versions. A failure means a saved look would change, so a new version is due instead.
+A golden test pins the exact pixels of 231 backgrounds: 126 of version 1, rendered by ScreenForge 0.34.0, what version 2 changed, and every style added since. GitHub Actions runs it on every push, there with a small tolerance for the edge anti-aliasing of older Cairo and Pixman versions. A failure means a saved look would change, so a new version is due instead.
 
 ```sh
 cargo test                                   # includes the golden test
 PROSPEKT_BLESS=1 cargo test --test golden     # rewrite after an intended change
 cargo run --release --example timing         # render times per style
 cargo run --release --example showcase DIR   # the README pictures as PNG
+cargo run --release --example vibrance_sheet OUT.png  # soft vs. strong colors
 ```
 
 ## License
